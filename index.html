@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>MIDNIGHT HIGHWAY - Prototype 0.1</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#03070d;font-family:system-ui,-apple-system,sans-serif;touch-action:none}
+#game{display:block;width:100vw;height:100vh;background:#07101b}
+#hud{position:fixed;inset:0;pointer-events:none;color:#eaf7ff;text-shadow:0 2px 5px #000}
+.top{position:absolute;top:max(10px,env(safe-area-inset-top));left:14px;right:14px;display:flex;justify-content:space-between;align-items:flex-start}
+.brand{font-weight:900;letter-spacing:2px;color:#8cffb0;font-size:clamp(12px,2.2vw,18px)}
+.stats{display:flex;gap:14px;text-align:right;font-weight:800}.stat small{display:block;color:#9eb5c9;font-size:10px;letter-spacing:1px}.stat b{font-size:clamp(16px,3vw,25px)}
+.bottom{position:absolute;left:14px;right:14px;bottom:max(12px,env(safe-area-inset-bottom));display:flex;justify-content:space-between;align-items:end}
+.pad{display:flex;gap:10px;align-items:end;pointer-events:auto}
+button{border:1px solid #79a9bf88;background:linear-gradient(180deg,#213b50dd,#091622ee);color:#fff;border-radius:15px;font-weight:800;min-width:58px;min-height:58px;padding:10px;box-shadow:0 5px 18px #0008;touch-action:none}
+button:active,.active{background:linear-gradient(180deg,#1a9a65,#075536);border-color:#8dffc0}
+.steer{font-size:25px;min-width:64px}.pedal{min-width:72px;min-height:76px}.gas{background:linear-gradient(180deg,#168c54dd,#064226ee)}.brake{background:linear-gradient(180deg,#a33d48dd,#4a1018ee)}
+.center{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;gap:7px;pointer-events:auto}
+.small{min-width:48px;min-height:40px;padding:6px;font-size:12px;border-radius:10px}
+#gear{font-size:clamp(32px,6vw,56px);color:#8cffb0;line-height:1}
+#mode{font-size:11px;color:#b8d3e5}
+#speedbox{position:absolute;right:16px;top:72px;text-align:right}
+#message{position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);font-weight:900;letter-spacing:2px;color:#b6ffd0;font-size:clamp(15px,3vw,24px);white-space:nowrap}
+#help{position:absolute;left:50%;top:15%;transform:translateX(-50%);font-size:11px;color:#c5d6e3;text-align:center;opacity:.8;white-space:nowrap}
+@media(orientation:portrait){#help{top:22%} .bottom{bottom:max(9px,env(safe-area-inset-bottom))}.center{bottom:100px}}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+ <div class="top">
+  <div><div class="brand">MIDNIGHT HIGHWAY</div><div id="mode">ARCADE PROTOTYPE 0.1</div></div>
+  <div class="stats">
+   <div class="stat"><small>TIME</small><b id="time">00:00.0</b></div>
+   <div class="stat"><small>DISTANCE</small><b id="distance">0.0 km</b></div>
+  </div>
+ </div>
+ <div id="speedbox"><div class="stat"><small>SPEED</small><b><span id="speed">0</span> <small style="display:inline">KM/H</small></b></div><div class="stat"><small>RPM</small><b id="rpm">900</b></div></div>
+ <div id="help">橫向遊玩效果最佳・左／右轉向・油門加速・煞車減速</div>
+ <div id="message">READY TO DRIVE</div>
+ <div class="bottom">
+  <div class="pad">
+   <button class="steer" id="left">◀</button><button class="steer" id="right">▶</button>
+  </div>
+  <div class="pad">
+   <button class="pedal brake" id="brake">BRAKE</button>
+   <button class="pedal gas" id="gas">ACCEL</button>
+  </div>
+ </div>
+ <div class="center">
+  <button class="small" id="trans">AT / MT</button>
+  <button class="small" id="gearDown">− GEAR</button>
+  <div style="text-align:center;min-width:42px"><div id="gear">1</div><div id="modeLabel">AT</div></div>
+  <button class="small" id="gearUp">+ GEAR</button>
+  <button class="small" id="gyro">GYRO OFF</button>
+  <button class="small" id="reset">RESET</button>
+ </div>
+</div>
+<script>
+(()=>{
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+let W=0,H=0,dpr=1;
+function resize(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener('resize',resize);resize();
+const $=id=>document.getElementById(id);
+let speed=0,steer=0,playerX=0,gear=1,mode='AT',gyro=false,tilt=0,elapsed=0,distance=0,roadScroll=0,traffic=[],last=performance.now(),started=false,shake=0;
+const maxGear=[0,105,165,220,275,320,350];
+function hold(id,key,val){const b=$(id);const on=e=>{e.preventDefault();keys[key]=val;b.classList.add('active')};const off=e=>{e.preventDefault();keys[key]=0;b.classList.remove('active')};b.addEventListener('pointerdown',on);['pointerup','pointercancel','pointerleave'].forEach(t=>b.addEventListener(t,off))}
+let keys={left:0,right:0,gas:0,brake:0};
+hold('left','left',1);hold('right','right',1);hold('gas','gas',1);hold('brake','brake',1);
+function reset(){speed=0;steer=0;playerX=0;gear=1;elapsed=0;distance=0;roadScroll=0;traffic=[];started=false;$('message').textContent='READY TO DRIVE';setTimeout(()=>{$('message').textContent=''},1300)}
+$('reset').onclick=reset;
+$('trans').onclick=()=>{mode=mode==='AT'?'MT':'AT';$('modeLabel').textContent=mode;$('message').textContent=mode==='AT'?'AUTO TRANSMISSION':'MANUAL TRANSMISSION';setTimeout(()=>$('message').textContent='',900)};
+$('gearUp').onclick=()=>{if(mode==='MT')gear=Math.min(6,gear+1)};
+$('gearDown').onclick=()=>{if(mode==='MT')gear=Math.max(1,gear-1)};
+$('gyro').onclick=async()=>{
+ if(!gyro && typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
+  try{const p=await DeviceOrientationEvent.requestPermission();if(p!=='granted')throw 0}catch(e){$('message').textContent='GYRO PERMISSION DENIED';setTimeout(()=>$('message').textContent='',1200);return}
+ }
+ gyro=!gyro;$('gyro').textContent=gyro?'GYRO ON':'GYRO OFF';
+};
+addEventListener('deviceorientation',e=>{if(e.gamma!==null)tilt=Math.max(-1,Math.min(1,e.gamma/28))});
+function roadPoint(t){const y=H*.43+t*H*.72;const curve=Math.sin(roadScroll*.00045+t*2.2)*W*.075 + Math.sin(roadScroll*.00019+t*5)*W*.025;const half=W*(.12+t*.43);return {y,cx:W/2+curve,half}}
+function poly(points,color){ctx.fillStyle=color;ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.fill()}
+function draw(){
+ ctx.clearRect(0,0,W,H);
+ let sky=ctx.createLinearGradient(0,0,0,H*.55);sky.addColorStop(0,'#030812');sky.addColorStop(1,'#142a3a');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H*.55);
+ // stars and skyline
+ for(let i=0;i<55;i++){let x=(i*173)%W,y=(i*47)%(H*.34);ctx.fillStyle=i%4?'#b7d5df55':'#b9ffe088';ctx.fillRect(x,y,1.5,1.5)}
+ for(let i=0;i<30;i++){let bw=W*.018+(i%3)*W*.009,bh=H*(.08+(i*37%20)/100),x=(i*W/22+((roadScroll*.025)%W))%W;ctx.fillStyle=i%2?'#102536':'#172b3a';ctx.fillRect(x,H*.43-bh,bw,bh);for(let yy=H*.43-bh+8;yy<H*.43-5;yy+=12)for(let xx=x+5;xx<x+bw-3;xx+=9){ctx.fillStyle='#8cf3d455';ctx.fillRect(xx,yy,3,4)}}
+ // distant horizon glow
+ let glow=ctx.createRadialGradient(W*.5,H*.43,2,W*.5,H*.43,W*.5);glow.addColorStop(0,'#1d665544');glow.addColorStop(1,'#06101a00');ctx.fillStyle=glow;ctx.fillRect(0,H*.2,W,H*.55);
+ // road trapezoid strips
+ let p0=roadPoint(0),p1=roadPoint(1);
+ poly([{x:p0.cx-p0.half,y:p0.y},{x:p0.cx+p0.half,y:p0.y},{x:p1.cx+p1.half,y:H},{x:p1.cx-p1.half,y:H}],'#202a32');
+ for(let i=0;i<22;i++){let t0=i/22,t1=(i+1)/22,a=roadPoint(t0),b=roadPoint(t1);if((Math.floor(roadScroll/90)+i)%2===0)poly([{x:a.cx-a.half,y:a.y},{x:a.cx+a.half,y:a.y},{x:b.cx+b.half,y:b.y},{x:b.cx-b.half,y:b.y}], '#26343d')}
+ // guard rails
+ for(let side of [-1,1]){ctx.strokeStyle='#79c6c766';ctx.lineWidth=2;ctx.beginPath();for(let i=0;i<=30;i++){let p=roadPoint(i/30);ctx.lineTo(p.cx+side*p.half,p.y)}ctx.stroke()}
+ // lane markers
+ for(let lane of [-.34,.34])for(let i=0;i<13;i++){let t=((i/13+((roadScroll/700)%1))%1),a=roadPoint(t),b=roadPoint(Math.min(1,t+.035));ctx.strokeStyle='#e8f5f477';ctx.lineWidth=1+t*4;ctx.beginPath();ctx.moveTo(a.cx+lane*a.half,a.y);ctx.lineTo(b.cx+lane*b.half,b.y);ctx.stroke()}
+ // traffic
+ traffic.forEach(c=>{let p=roadPoint(c.z);let x=p.cx+c.lane*p.half;let s=.12+c.z*.95;ctx.fillStyle='#05090e';ctx.fillRect(x-18*s,p.y-28*s,36*s,28*s);ctx.fillStyle=c.color;ctx.fillRect(x-16*s,p.y-26*s,32*s,22*s);ctx.fillStyle='#9ed8e7';ctx.fillRect(x-12*s,p.y-24*s,24*s,7*s);ctx.fillStyle='#ff4242';ctx.fillRect(x-14*s,p.y-7*s,5*s,4*s);ctx.fillRect(x+9*s,p.y-7*s,5*s,4*s)});
+ // player car
+ const p=roadPoint(1),cx=p.cx+playerX*p.half,cy=H*.88,carW=Math.min(W*.17,150),carH=carW*.62;
+ ctx.save();ctx.translate(cx,cy);ctx.rotate(-steer*.07);
+ ctx.fillStyle='#0009';ctx.beginPath();ctx.ellipse(0,carH*.35,carW*.62,carH*.22,0,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle='#07111b';ctx.fillRect(-carW*.48,-carH*.2,carW*.96,carH*.62);
+ let cg=ctx.createLinearGradient(0,-carH*.5,0,carH*.5);cg.addColorStop(0,'#5bb8ff');cg.addColorStop(.45,'#1260a5');cg.addColorStop(1,'#08294c');ctx.fillStyle=cg;
+ ctx.beginPath();ctx.moveTo(-carW*.5,carH*.05);ctx.lineTo(-carW*.38,-carH*.42);ctx.lineTo(-carW*.2,-carH*.56);ctx.lineTo(carW*.2,-carH*.56);ctx.lineTo(carW*.4,-carH*.4);ctx.lineTo(carW*.5,carH*.05);ctx.lineTo(carW*.46,carH*.36);ctx.lineTo(-carW*.46,carH*.36);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#091c2b';ctx.beginPath();ctx.moveTo(-carW*.31,-carH*.39);ctx.lineTo(-carW*.17,-carH*.52);ctx.lineTo(carW*.17,-carH*.52);ctx.lineTo(carW*.31,-carH*.39);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#ff3949';ctx.fillRect(-carW*.43,carH*.12,carW*.19,carH*.07);ctx.fillRect(carW*.24,carH*.12,carW*.19,carH*.07);
+ ctx.fillStyle='#d5eaff';ctx.fillRect(-carW*.18,carH*.28,carW*.36,carH*.035);
+ ctx.restore();
+ // speed streaks
+ if(speed>100){ctx.strokeStyle='#8ad9ff33';ctx.lineWidth=2;for(let i=0;i<12;i++){let x=(i*97+roadScroll*.2)%W,y=(i*71+roadScroll*.7)%H;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-10,y+25+speed*.08);ctx.stroke()}}
+}
+function update(dt){
+ const accel=keys.gas?1:0,br=keys.brake?1:0;
+ let steerInput=(keys.right-keys.left)+(gyro?tilt:0);steer+=((steerInput)-steer)*Math.min(1,dt*5);
+ if(accel){started=true;speed+= (mode==='AT'?48:42)*dt*(1-speed/380)}else speed-=10*dt;
+ if(br)speed-=95*dt;
+ speed=Math.max(0,Math.min(350,speed));
+ if(mode==='AT'){gear=speed<45?1:speed<95?2:speed<150?3:speed<210?4:speed<275?5:6}
+ else {const cap=maxGear[gear];if(speed>cap)speed-=Math.min(35,(speed-cap)*2)*dt}
+ playerX+=steer*dt*(.55+speed/300);playerX=Math.max(-.88,Math.min(.88,playerX));
+ roadScroll+=speed*dt*2.3;distance+=speed*dt/3600;elapsed+=started?dt:0;
+ if(Math.random()<dt*(.25+speed/500))traffic.push({z:.02,lane:(Math.random()>.5?.34:-.34),color:['#d94b45','#d5dce5','#d8b64d','#6d9aaf'][Math.floor(Math.random()*4)]});
+ traffic.forEach(c=>c.z+=dt*(.08+speed/1700));traffic=traffic.filter(c=>c.z<1.15);
+ traffic.forEach(c=>{if(c.z>.88&&c.z<1.02&&Math.abs(c.lane-playerX)<.17){speed*=.985;shake=4}});
+ shake=Math.max(0,shake-dt*10);
+ $('speed').textContent=Math.round(speed);$('rpm').textContent=Math.round(900+((speed*gear*27)%6500));
+ $('gear').textContent=gear;$('distance').textContent=distance.toFixed(2)+' km';
+ $('time').textContent=String(Math.floor(elapsed/60)).padStart(2,'0')+':'+String(Math.floor(elapsed%60)).padStart(2,'0')+'.'+Math.floor(elapsed%1*10);
+}
+function loop(now){let dt=Math.min(.04,(now-last)/1000);last=now;update(dt);if(shake){ctx.save();ctx.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);draw();ctx.restore()}else draw();requestAnimationFrame(loop)}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
